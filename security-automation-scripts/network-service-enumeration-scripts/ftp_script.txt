@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# scan_cidrs.sh — non-root scan for hosts with port 21 open from a list of CIDRs
+# Usage: ./scan_cidrs.sh cidrs.txt results.txt
+# cidrs.txt: one CIDR per line (comments with # allowed)
+
+set -euo pipefail
+
+INPUT_FILE="${1:-cidrs.txt}"
+OUTPUT_FILE="${2:-open_http_ips.txt}"
+
+# check nmap
+if ! command -v nmap >/dev/null 2>&1; then
+  echo "ERROR: nmap not found. Install nmap and re-run."
+  exit 2
+fi
+
+TMP="$(mktemp)"
+trap 'rm -f "$TMP"' EXIT
+
+# ensure output file is empty initially
+: > "$TMP"
+
+while IFS= read -r line || [[ -n $line ]]; do
+  # strip comments and surrounding whitespace
+  cidr="${line%%#*}"
+  cidr="${cidr#"${cidr%%[![:space:]]*}"}"
+  cidr="${cidr%"${cidr##*[![:space:]]}"}"
+
+  # skip blank lines
+  [ -z "$cidr" ] && continue
+
+  echo "Scanning: $cidr"
+  # -n    : no DNS resolution (faster)
+  # -sT   : TCP connect scan (doesn't need root)
+  # -p21  : only port 21
+  # --open: show only hosts with the port open
+  # -oG - : grepable output to stdout so we can parse IPs reliably
+  nmap -n -sT -p80 --open -oG - "$cidr" 2>/dev/null \
+    | awk '/Ports:/{ if ($0 ~ /21\/open/) print $2 }' >> "$TMP"
+
+done < "$INPUT_FILE"
+
+# dedupe and write final results
+sort -u "$TMP" > "$OUTPUT_FILE"
+echo "Scan complete. Hosts with port 21 open written to: $OUTPUT_FILE"
+echo "Found $(wc -l < "$OUTPUT_FILE") hosts."

@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# scan_rdp_nonroot.sh
+# Non-root scanner: read CIDRs from cidrs.txt and find IPs with TCP port 3389 open.
+# Uses nmap -sT (TCP connect) which does not require root privileges.
+
+set -euo pipefail
+
+INPUT_FILE="cidrs.txt"
+OUTPUT_FILE="open_rdp_ips.txt"
+
+# check prerequisites
+if ! command -v nmap >/dev/null 2>&1; then
+  echo "ERROR: nmap is not installed. Install nmap and try again."
+  exit 1
+fi
+
+if [[ ! -f "$INPUT_FILE" ]]; then
+  echo "ERROR: '$INPUT_FILE' not found. Put your CIDR lines (one per line) in $INPUT_FILE."
+  exit 1
+fi
+
+TMP=$(mktemp)
+trap 'rm -f "$TMP"' EXIT
+
+# clear output
+: > "$OUTPUT_FILE"
+
+while IFS= read -r cidr || [[ -n "$cidr" ]]; do
+  # skip blank lines and lines starting with #
+  if [[ -z "${cidr//[[:space:]]/}" ]]; then
+    continue
+  fi
+  if [[ "$cidr" =~ ^[[:space:]]*# ]]; then
+    continue
+  fi
+
+  echo "Scanning: $cidr"
+  # -Pn skip ping discovery (useful if ICMP blocked)
+  # -n    skip DNS resolution (faster)
+  # -p 3389 scan port 3389
+  # -sT  TCP connect scan (does not require root)
+  # --open show only hosts with open ports
+  # -oG - output in grepable format to stdout
+  nmap -Pn -n -p 3389 -sT --open "$cidr" -oG - >> "$TMP" 2>/dev/null || true
+done < "$INPUT_FILE"
+
+# Parse grepable output: lines with "Ports:" and "3389/open" -> extract the IP after "Host:"
+awk '
+/Ports:/ {
+  if ($0 ~ /3389\/open/) {
+    for (i=1;i<=NF;i++) {
+      if ($i == "Host:") { print $(i+1); break }
+    }
+  }
+}
+' "$TMP" | sort -u > "$OUTPUT_FILE"
+
+echo "Done. IPs with port 3389 open saved to: $OUTPUT_FILE"
+echo "Total found: $(wc -l < "$OUTPUT_FILE")"

@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# scan_cidrs_port161.sh — scan CIDRs for hosts with port 161 (SNMP)
+# - If run as root: uses nmap UDP scan (-sU) for best accuracy
+# - If run non-root: does a best-effort UDP probe per-IP using nc (may miss hosts)
+# Usage: ./scan_cidrs_port161.sh cidrs.txt results.txt
+# cidrs.txt: one CIDR per line (comments with # allowed)
+
+set -euo pipefail
+
+INPUT_FILE="${1:-cidrs.txt}"
+OUTPUT_FILE="${2:-open_snmp_ips.txt}"
+
+# tools
+if ! command -v nmap >/dev/null 2>&1; then
+  echo "ERROR: nmap not found. Install nmap and re-run." >&2
+  exit 2
+fi
+
+NC_OK=0
+if command -v nc >/dev/null 2>&1; then
+  NC=nc
+  NC_OK=1
+elif command -v ncat >/dev/null 2>&1; then
+  NC=ncat
+  NC_OK=1
+fi
+
+TMP="$(mktemp)"
+trap 'rm -f "$TMP"' EXIT
+
+: > "$TMP"
+
+# helper: expand CIDR to list of IPs (no scanning) using nmap's list scan output
+expand_cidr_to_ips() {
+  local cidr="$1"
+  # Nmap "list scan" (-sL) prints lines like "Nmap scan report for 192.0.2.1"
+  nmap -n -sL "$cidr" 2>/dev/null | awk '/Nmap scan report for/{print $NF}'
+}
+
+# Are we root?
+IS_ROOT=0
+if [ "$(id -u)" -eq 0 ]; then
+  IS_ROOT=1
+fi
+
+while IFS= read -r line || [[ -n $line ]]; do
+  # strip comments and surrounding whitespace
+  cidr="${line%%#*}"
+  cidr="${cidr#"${cidr%%[![:space:]]*}"}"
+  cidr="${cidr%"${cidr##*[![:space:]]}"}"
+
+  [ -z "$cidr" ] && continue
+
+  echo "Scanning: $cidr"
+
+  if [ "$IS_ROOT" -eq 1 ]; then
+    # Accurate UDP scan with nmap (requires root for best results)
+    # -n       : no DNS resolution
+    # -sU      : UDP scan
+    # -p161    : only port 161
+    # --open   : show only hosts with port open
+    # -oG -    : grepable output to stdout
+    nmap -n -sU -p161 --open -oG - "$cidr" 2>/dev/null \
+      | awk '/Ports:/{ if ($0 ~ /161\/open/) print $2 }' >> "$TMP"
+  else
+    # Non-root fallback: best-effort per-IP UDP probe using nc (requires nc/ncat)
+    if [ "$NC_OK" -ne 1 ]; then
+      echo "WARNING: not running as root and no 'nc'/'ncat' found — cannot perform non-root UDP probes reliably." >&2
+      echo "Consider installing 'netcat' (nc) or running the script as root for accurate results." >&2
+      continue
+    fi
+
+    # expand CIDR to IPs then probe each IP with netcat UDP; netcat exit 0 often means response received
+    expand_cidr_to_ips "$cidr" | while IFS= read -r ip; do
+      # quick probe: send zero-byte/short packet and wait briefly
+      # many implementations accept -z -u -w <timeout> ; adjust if your nc uses different flags
+      if $NC -z -u -w1 "$ip" 161 >/dev/null 2>&1; then
+        echo "$ip" >> "$TMP"
+      else
+        # Some netcat variants return non-zero even if port is open but silent;
+        # nothing to do here — we only capture positive replies.
+        :
+      fi
+    done
+  fi
+
+done < "$INPUT_FILE"
+
+sort -u "$TMP" > "$OUTPUT_FILE"
+echo "Scan complete."
+echo "Mode: $( [ "$IS_ROOT" -eq 1 ] && echo 'root (nmap -sU) — accurate' || echo 'non-root (netcat probes) — best-effort, may miss hosts' )"
+echo "Hosts with port 161 open written to: $OUTPUT_FI_
