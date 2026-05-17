@@ -151,20 +151,6 @@ All activities were conducted within isolated educational lab environments desig
 
 ---
 
-## Repository Structure
-
-```text
-.
-├── README.md
-├── screenshots/
-├── payloads/
-├── scans/
-├── notes/
-└── research/
-```
-
----
-
 ## Author
 
 Claudia Arrunategui  
