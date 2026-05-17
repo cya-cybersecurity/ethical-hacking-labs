@@ -1,0 +1,23 @@
+How to run it: 
+./count_windows_hosts.sh 172.16.99.0/24
+
+Text file script: 
+#!/bin/bash
+
+# Check if subnet was provided
+if [ -z "$1" ]; then
+    echo "Usage: $0 <CIDR-IP-range>"
+    echo "Example: $0 192.168.1.0/24"
+    exit 1
+fi
+
+CIDR="$1"
+
+# Run nmap OS detection and store output
+echo "[*] Scanning network: $CIDR with OS detection..."
+OUTPUT=$(nmap -O "$CIDR")
+
+# Count number of hosts reporting "Windows" in the OS guess
+WINDOWS_COUNT=$(echo "$OUTPUT" | grep -i "Running:.*Windows" | wc -l)
+
+echo "[*] Number of Windows boxes found: $WINDOWS_COUNT"
