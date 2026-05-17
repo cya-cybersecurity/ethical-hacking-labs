@@ -134,19 +134,6 @@ This project was completed in isolated educational lab environments for authoriz
 
 ---
 
-## Repository Structure
-
-```text
-.
-├── README.md
-├── screenshots/
-├── notes/
-├── scans/
-└── configs/
-```
-
----
-
 ## Author
 
 Claudia Arrunategui  
